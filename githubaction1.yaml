@@ -1,0 +1,61 @@
+name: GitHub Actions Demo for Branch and PR Operations
+
+on:
+  workflow_dispatch:  # Allows manual triggering from GitHub UI
+
+jobs:
+  manage-branch-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed for branch creation and merging
+      pull-requests: write  # Needed for PR operations
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}  # Use the default token
+
+      - name: Set up GitHub CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gh
+          gh auth login --with-token <<< ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create a new branch
+        run: |
+          NEW_BRANCH="feature/demo-branch-$(date +%s)"
+          gh api repos/${{ github.repository }}/git/refs -f ref="refs/heads/$NEW_BRANCH" -f sha="${{ github.sha }}" --jq '.ref'
+          echo "Created branch: $NEW_BRANCH"
+          echo "NEW_BRANCH=$NEW_BRANCH" >> $GITHUB_ENV
+
+      - name: Make a change and commit to the new branch
+        run: |
+          git checkout ${{ env.NEW_BRANCH }}
+          echo "Demo change on $(date)" >> demo.txt
+          git add demo.txt
+          git commit -m "Add demo change"
+          git push origin ${{ env.NEW_BRANCH }}
+
+      - name: Open a Pull Request
+        run: |
+          PR_URL=$(gh pr create --title "Demo PR from ${{ env.NEW_BRANCH }}" --body "This is a demo PR" --base main --head ${{ env.NEW_BRANCH }} --output json --jq '.url')
+          echo "Opened PR: $PR_URL"
+          PR_NUMBER=$(basename $PR_URL)
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
+
+      - name: Close the Pull Request
+        run: |
+          gh pr close ${{ env.PR_NUMBER }} --comment "Closing demo PR"
+
+      - name: Reopen the Pull Request (for demo purposes)
+        run: |
+          gh pr reopen ${{ env.PR_NUMBER }} --comment "Reopening for merge demo"
+
+      - name: Merge the Pull Request
+        run: |
+          gh pr merge ${{ env.PR_NUMBER }} --merge --delete-branch --body "Merging demo PR"
+
+      - name: Cleanup branch (optional)
+        run: |
+          gh api repos/${{ github.repository }}/git/refs/heads/${{ env.NEW_BRANCH }} -X DELETE || true
